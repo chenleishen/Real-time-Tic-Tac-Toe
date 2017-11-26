@@ -1,0 +1,147 @@
+#!/usr/bin/env node
+
+/**
+ * Module dependencies.
+ */
+
+const app = require('../app');
+const debug = require('debug')('react-backend:server');
+const http = require('http');
+const uuidv1 = require('uuid/v1');
+
+let players = [];
+
+/**
+ * Get port from environment and store in Express.
+ */
+
+var port = normalizePort(process.env.PORT || '3001');
+app.set('port', port);
+
+/**
+ * Create HTTP server.
+ */
+
+var server = http.createServer(app);
+
+/**
+ * Listen on provided port, on all network interfaces.
+ */
+const io = require('socket.io')(server);
+
+const getUser = io.of('/getUser');
+getUser
+  .on('connection', (socket) => {
+    socket.on('userConnected', (player) => {
+      console.log('userConnected');
+      player['socketId'] = socket.id;
+      console.log(player);
+      players.push(player);
+      getUser.emit('userConnected', players);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('socket disconnect');
+      console.log(socket.id);
+        const removePlayerIndex = players.findIndex((player) => {
+          return player.socketId === socket.id;
+        });
+        players.splice(removePlayerIndex, 1);
+        getUser.emit('userDisconnected', players);
+    });
+
+    socket.on('opponentSelected', (pair) => {
+      console.log('game started');
+      socket.to(pair.opponent.socketId).emit('challenged', pair);
+    });
+
+    socket.on('error', (error) => {
+      console.log('error');
+      console.log(error);
+    });
+});
+
+const game = io.of('/game');
+game
+  .on('connection', (socket) => {
+    socket.on('userConnected', (roomId) => {
+      socket.join(roomId);
+      console.log('joined room ' + roomId);
+    });
+
+    socket.on('move', (data) => {
+      socket.to(data.roomId).emit('move', data.updatedState);
+    });
+
+    socket.on('disconnect', () => {
+      console.log(' user disconnected');
+    });
+
+    socket.on('error', (error) => {
+      console.log(error);
+    });
+});
+
+server.listen(port);
+server.on('error', onError);
+server.on('listening', onListening);
+
+/**
+ * Normalize a port into a number, string, or false.
+ */
+
+function normalizePort(val) {
+  var port = parseInt(val, 10);
+
+  if (isNaN(port)) {
+    // named pipe
+    return val;
+  }
+
+  if (port >= 0) {
+    // port number
+    return port;
+  }
+
+  return false;
+}
+
+/**
+ * Event listener for HTTP server "error" event.
+ */
+
+function onError(error) {
+  if (error.syscall !== 'listen') {
+    throw error;
+  }
+
+  var bind = typeof port === 'string'
+    ? 'Pipe ' + port
+    : 'Port ' + port;
+
+  // handle specific listen errors with friendly messages
+  switch (error.code) {
+    case 'EACCES':
+      console.error(bind + ' requires elevated privileges');
+      process.exit(1);
+      break;
+    case 'EADDRINUSE':
+      console.error(bind + ' is already in use');
+      process.exit(1);
+      break;
+    default:
+      throw error;
+  }
+}
+
+/**
+ * Event listener for HTTP server "listening" event.
+ */
+
+function onListening() {
+  var addr = server.address();
+  var bind = typeof addr === 'string'
+    ? 'pipe ' + addr
+    : 'port ' + addr.port;
+  debug('Listening on ' + bind);
+}
